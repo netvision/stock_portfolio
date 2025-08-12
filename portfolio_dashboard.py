@@ -56,8 +56,10 @@ with st.sidebar:
             return ref
         except Exception:
             return default
-    m_base_url = st.text_input('Base URL', value=_sec('mstock.base_url', 'https://api.example.com'))
-    m_token = st.text_input('Access Token', value=_sec('mstock.access_token', ''), type='password')
+    m_base_url = st.text_input('Base URL', value=_sec('mstock.base_url', 'https://api.mstock.trade'))
+    m_api_key = st.text_input('API Key', value=_sec('mstock.api_key', ''), type='password')
+    m_jwt = st.text_input('JWT Token (access token)', value=_sec('mstock.jwt_token', ''), type='password')
+    m_priv = st.text_input('Private Key (optional)', value=_sec('mstock.private_key', ''), type='password')
     m_client_id = st.text_input('Client ID (optional)', value=_sec('mstock.client_id', ''))
     m_dry_run = st.checkbox('Dry run (paper trade)', value=True)
     m_connect = st.button('Test connection')
@@ -384,9 +386,9 @@ st.info('Educational signals only, not financial advice. Validate with your own 
 
 # --- Broker integration (mStock) ---
 def get_mstock_client():
-    if not m_base_url or not m_token:
+    if not m_base_url or not m_api_key or not m_jwt:
         return None
-    cfg = MStockConfig(base_url=m_base_url, access_token=m_token, client_id=m_client_id or None, dry_run=m_dry_run)
+    cfg = MStockConfig(base_url=m_base_url, api_key=m_api_key, jwt_token=m_jwt, private_key=m_priv or None, client_id=m_client_id or None, dry_run=m_dry_run)
     return MStockClient(cfg)
 
 def append_order_log(row: dict, file_path: str = 'orders_log.csv'):

@@ -6,7 +6,10 @@ import requests
 @dataclass
 class MStockConfig:
     base_url: str
-    access_token: str
+    api_key: str
+    jwt_token: str
+    private_key: Optional[str] = None
+    version: int = 1
     client_id: Optional[str] = None
     timeout: int = 10
     dry_run: bool = True
@@ -22,11 +25,15 @@ class MStockClient:
     def __init__(self, config: MStockConfig):
         self.config = config
         self.session = requests.Session()
-        self.session.headers.update({
-            "Authorization": f"Bearer {self.config.access_token}",
+        headers = {
+            "X-Mirae-Version": str(self.config.version),
+            "Authorization": f"token {self.config.api_key}:{self.config.jwt_token}",
             "Content-Type": "application/json",
             "Accept": "application/json",
-        })
+        }
+        if self.config.private_key:
+            headers["X-PrivateKey"] = self.config.private_key
+        self.session.headers.update(headers)
 
     def _url(self, path: str) -> str:
         return f"{self.config.base_url.rstrip('/')}/{path.lstrip('/')}"
@@ -43,16 +50,17 @@ class MStockClient:
 
     # Public methods (adjust paths to match your mStock API)
     def get_profile(self):
-        return self._maybe_send("GET", "/api/v1/profile")
+        # Endpoint name may vary per API grouping
+        return self._maybe_send("GET", "/user/profile")
 
     def get_holdings(self):
-        return self._maybe_send("GET", "/api/v1/holdings")
+        return self._maybe_send("GET", "/portfolio/holdings")
 
     def get_positions(self):
-        return self._maybe_send("GET", "/api/v1/positions")
+        return self._maybe_send("GET", "/position")
 
     def get_quote(self, symbol: str):
-        return self._maybe_send("GET", "/api/v1/quote", params={"symbol": symbol})
+        return self._maybe_send("GET", "/market/quote", params={"symbol": symbol})
 
     def place_order(
         self,
@@ -77,10 +85,10 @@ class MStockClient:
             "stop_loss": stop_loss,
             "remarks": remarks,
         }
-        return self._maybe_send("POST", "/api/v1/orders", json=payload)
+    return self._maybe_send("POST", "/orders", json=payload)
 
     def cancel_order(self, order_id: str):
-        return self._maybe_send("DELETE", f"/api/v1/orders/{order_id}")
+        return self._maybe_send("DELETE", f"/orders/{order_id}")
 
     def list_orders(self):
-        return self._maybe_send("GET", "/api/v1/orders")
+        return self._maybe_send("GET", "/orders")
