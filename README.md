@@ -27,3 +27,18 @@ Suffix .NS is added automatically.
 
 ## Notes
 Data is best-effort and may differ from broker data. Signals are educational only.
+
+## Deploy for free
+
+### Option 1: Streamlit Community Cloud (free)
+1. Push this repo to GitHub (done).
+2. Go to https://share.streamlit.io/ and sign in with GitHub.
+3. Create new app: pick this repo and branch `main`, main file `portfolio_dashboard.py`.
+4. Advanced settings: leave default. The app will pick `requirements.txt` and `runtime.txt` (Python 3.11).
+5. Click Deploy. After first build, your app URL will be available to share.
+
+### Option 2: Hugging Face Spaces (free)
+1. Create a new Space: type = Streamlit.
+2. Connect it to your GitHub repo or upload files.
+3. In Space settings, ensure `App file` = `portfolio_dashboard.py`.
+4. The Space builds automatically and gives you a public URL.
