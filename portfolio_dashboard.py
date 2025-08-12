@@ -2,9 +2,6 @@ import streamlit as st
 import pandas as pd
 import yfinance as yf
 import numpy as np
-import os
-from datetime import datetime
-from mstock_client import MStockClient, MStockConfig
 
 # Page setup
 st.set_page_config(page_title='Indian Stock Portfolio Dashboard', layout='wide')
@@ -45,24 +42,6 @@ with st.sidebar:
     research_symbol_input = st.text_input('Enter symbol to research (e.g., RELIANCE or RELIANCE.NS)')
     research_horizon = st.selectbox('Horizon', ['Short-term', 'Long-term'])
     research_go = st.button('Analyze stock')
-    st.markdown('---')
-    st.header('Broker (mStock)')
-    # Load defaults from secrets if available
-    def _sec(path, default=""):
-        try:
-            ref = st.secrets
-            for p in path.split('.'):
-                ref = ref[p]
-            return ref
-        except Exception:
-            return default
-    m_base_url = st.text_input('Base URL', value=_sec('mstock.base_url', 'https://api.mstock.trade'))
-    m_api_key = st.text_input('API Key', value=_sec('mstock.api_key', ''), type='password')
-    m_jwt = st.text_input('JWT Token (access token)', value=_sec('mstock.jwt_token', ''), type='password')
-    m_priv = st.text_input('Private Key (optional)', value=_sec('mstock.private_key', ''), type='password')
-    m_client_id = st.text_input('Client ID (optional)', value=_sec('mstock.client_id', ''))
-    m_dry_run = st.checkbox('Dry run (paper trade)', value=True)
-    m_connect = st.button('Test connection')
 
 # Load portfolio
 portfolio_df = None
@@ -209,14 +188,13 @@ def line_chart_safe(df: pd.DataFrame, cols: list, title: str, window: int = 260)
     sub = df[cols_present].dropna(how='all')
     if window:
         sub = sub.tail(window)
-    # Keep only columns with at least one non-NaN value
     non_empty_cols = [c for c in sub.columns if sub[c].notna().any()]
     if sub.empty or not non_empty_cols:
         st.info('Not enough data to display chart.')
         return
     st.line_chart(sub[non_empty_cols])
 
-# Fetch live prices
+# Fetch live prices and compute portfolio metrics
 if refresh:
     fetch_live_price.clear()
     fetch_history.clear()
@@ -253,8 +231,6 @@ st.dataframe(
         .rename(columns={'live_price_num':'live_price'}),
     use_container_width=True
 )
-
-st.subheader('🧭 Signals')
 
 def generate_signal(symbol: str, price: float, buy_price: float):
     hist = fetch_history(symbol, period=analysis_period)
@@ -350,8 +326,14 @@ def generate_signal(symbol: str, price: float, buy_price: float):
 sig_rows = []
 with st.spinner('Analyzing signals...'):
     for _, r in portfolio_df.iterrows():
-        rec, score, reasons = generate_signal(r['symbol'], r['live_price_num'], r['buy_price'])
-        sig_rows.append({'symbol': r['symbol'], 'signal': rec, 'score': score, 'reasons': reasons, 'return_%': r['return_%']})
+        rec, score, reasons = generate_signal(r['symbol'], r.get('live_price_num', np.nan), r['buy_price'])
+        sig_rows.append({
+            'symbol': r['symbol'],
+            'signal': rec,
+            'score': score,
+            'reasons': reasons,
+            'return_%': r['return_%']
+        })
 signals_df = pd.DataFrame(sig_rows).sort_values(['signal','score','return_%'], ascending=[True, False, True])
 
 def style_signal(row):
@@ -383,91 +365,6 @@ if sym:
         line_chart_safe(ind, ['MACD','MACD_signal'], 'MACD (12,26,9)')
 
 st.info('Educational signals only, not financial advice. Validate with your own research and risk management.')
-
-# --- Broker integration (mStock) ---
-def get_mstock_client():
-    if not m_base_url or not m_api_key or not m_jwt:
-        return None
-    cfg = MStockConfig(base_url=m_base_url, api_key=m_api_key, jwt_token=m_jwt, private_key=m_priv or None, client_id=m_client_id or None, dry_run=m_dry_run)
-    return MStockClient(cfg)
-
-def append_order_log(row: dict, file_path: str = 'orders_log.csv'):
-    df = pd.DataFrame([row])
-    if os.path.exists(file_path):
-        df.to_csv(file_path, mode='a', header=False, index=False)
-    else:
-        df.to_csv(file_path, index=False)
-
-def read_orders_log(file_path: str = 'orders_log.csv') -> pd.DataFrame:
-    if os.path.exists(file_path):
-        try:
-            return pd.read_csv(file_path)
-        except Exception:
-            return pd.DataFrame()
-    return pd.DataFrame()
-
-if m_connect:
-    cli = get_mstock_client()
-    if cli is None:
-        st.warning('Provide Base URL and Access Token to connect.')
-    else:
-        with st.spinner('Connecting to mStock...'):
-            try:
-                prof = cli.get_profile()
-                st.success('Connected (dry-run)' if m_dry_run else 'Connected')
-                st.json(prof)
-            except Exception as e:
-                st.error(f'Connection failed: {e}')
-
-st.subheader('🧾 Orders (local log)')
-orders_df = read_orders_log()
-if orders_df.empty:
-    st.info('No orders in local log yet.')
-else:
-    st.dataframe(orders_df, use_container_width=True)
-    st.download_button('Download orders log', data=orders_df.to_csv(index=False), file_name='orders_log.csv', mime='text/csv')
-
-with st.expander('Place order via mStock (safe: dry-run by default)'):
-    order_symbol = st.selectbox('Symbol', options=portfolio_df['symbol'].tolist())
-    order_side = st.radio('Side', options=['BUY','SELL'], horizontal=True)
-    order_qty = st.number_input('Quantity', min_value=1, step=1, value=int(max(1, portfolio_df.loc[portfolio_df['symbol']==order_symbol, 'quantity'].max() or 1)))
-    order_type = st.selectbox('Order Type', options=['MARKET','LIMIT'])
-    order_product = st.selectbox('Product', options=['CNC','MIS','NRML'])
-    order_price = st.number_input('Limit Price (if LIMIT)', min_value=0.0, step=0.05, value=0.0, format='%0.2f')
-    order_go = st.button('Place order')
-    if order_go:
-        cli = get_mstock_client()
-        if cli is None:
-            st.warning('Configure Base URL and Access Token in the sidebar to place orders.')
-        else:
-            with st.spinner('Sending order...'):
-                try:
-                    payload_price = float(order_price) if order_type == 'LIMIT' and order_price > 0 else None
-                    resp = cli.place_order(
-                        symbol=order_symbol,
-                        side=order_side,
-                        quantity=int(order_qty),
-                        order_type=order_type,
-                        product=order_product,
-                        price=payload_price,
-                        remarks='streamlit-portfolio'
-                    )
-                    ts = datetime.now().isoformat(timespec='seconds')
-                    log_row = {
-                        'ts': ts,
-                        'symbol': order_symbol,
-                        'side': order_side,
-                        'quantity': int(order_qty),
-                        'order_type': order_type,
-                        'product': order_product,
-                        'price': payload_price,
-                        'dry_run': m_dry_run,
-                        'response': str(resp)[:500],
-                    }
-                    append_order_log(log_row)
-                    st.success('Order sent (dry-run)' if m_dry_run else 'Order placed.')
-                except Exception as e:
-                    st.error(f'Order failed: {e}')
 
 # --- Research a new stock ---
 st.subheader('🧪 Research a new stock for potential addition')
@@ -575,9 +472,9 @@ if research_go and symbol_raw:
         st.caption('Entry/Stop suggestions (illustrative)')
         st.write(f"Suggested entry: ₹{entry:,.2f} | Suggested stop: ₹{stop:,.2f} | Risk per share: {risk_pct:.2f}%")
         st.write('Reasons:')
-        st.markdown('\n'.join([f'- {r}' for r in reasons]) or '- No strong signals detected')
+    st.markdown('\n'.join([f'- {r}' for r in reasons]) or '- No strong signals detected')
 
-        # Charts
+    # Charts
     line_chart_safe(ind_r, ['Close','SMA20','SMA50','SMA200'], 'Price with SMA20/50/200')
     line_chart_safe(ind_r, ['RSI'], 'RSI (14)')
     line_chart_safe(ind_r, ['MACD','MACD_signal'], 'MACD (12,26,9)')
